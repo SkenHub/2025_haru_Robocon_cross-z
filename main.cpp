@@ -7,145 +7,114 @@
   * @brief   Default main function.
   ******************************************************************************
 */
-
 #include "stm32f4xx.h"
 #include "stm32f4xx_nucleo.h"
 #include "sken_library/include.h"
-#include "sken_module.hpp"
+#include "math.h"
 
-Uart serial;
-uint8_t sri_data_r[4];
-uint8_t sri_data_s[4];
-int sirei_r = 0;
-int sirei_s = 0;
-
-//uint8_t send_data_DD[8] = {1,1,1,1,1,1,1,1};
-uint8_t send_data_DD[8] = {0,0,0,0,0,0,0,0};
-int limit_data[7];
-Gpio SW;
 Encoder encoder[4];
 Encoder_data e_data[4];
-CanData can_data_enc;
-uint8_t candata_enc;
-int16_t x,y,theta;
+CanData can_data_r;
+int16_t x = 0,y = 0;
+double theta =  0.0;
+uint8_t send_data_enc[8];
+uint8_t send_data_limit[8];
+Gpio limit[8];
+double keisoku_k[4];
+double tyok = 596.4;
+double pai = 3.14159265;
+double k_han = 143.165;
+double keisoku[4];
+uint8_t a,b,c,d,e,f;
+double prev_deg[4] = {0, 0, 0, 0};
+double init_deg[4] = {0, 0, 0, 0};
+bool init_done = false;
 
-Pid pid_control;
-Pid pid_mtr_koon;
-Pid pid_mtr_bool;
-double target = 30.0;
-double now[4];
-uint8_t out_bool[8];
-
-const uint8_t mtr_org[8] = {0,0,0,0,0,0,0,0};
-uint8_t mtr_rps_on[8] = {30/*out_bool[0]*/,30/*out_bool[1]*/,5,0,0,0,0,0};
-uint8_t mtr_rps_off[8] = {0,0,0,0,0,0,0,0};
-uint8_t asi_rps[8] = {sri_data_r[0],sri_data_r[1],sri_data_r[2],0,0,0,0,0};
-uint8_t asi_rps_off[8] = {1,0,0,0,0,0,0,0};
-
-double mtr_koon_d;
-double mtr_bool_h;
-double mtr_bool_l;
-double kyori;
-Motor mtr;
-double out;
-
-void main_interrupt(void){
-	module_transmitter[SOLENOID_0].transmit(send_data_DD);
-	for(int a=0;a<7;a++){
-	    if (module_receiver[SENSOR_0].get_limit(a)) {
-            limit_data[a] = 1;
-	    }
-	    else limit_data[a] = 0;
+void can(void){
+	if(can_data_r.rx_stdid == 0x300){
+	  a = can_data_r.rx_data[0];
 	}
-	module_receiver[SENSOR_0].get_enc(&x,&y,&theta);
-	//sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_enc);
-	encoder[0].interrupt(&e_data[0]);
-	encoder[1].interrupt(&e_data[1]);
-	encoder[2].interrupt(&e_data[2]);
-	encoder[3].interrupt(&e_data[3]);
-	mtr_koon_d = e_data[0].deg;
-	mtr_bool_h = e_data[1].rps;
-	mtr_bool_l = e_data[2].rps;
-	out_bool[0] = pid_control.control(target,mtr_bool_h,1);
-	out_bool[1] = pid_control.control(target,mtr_bool_l,1);
-	sri_data_s[0] = x;
-	sri_data_s[1] = y;
-	sri_data_s[2] = theta;
-}
-
-void hk_kaiyu(void){
-	if(sirei_r == 1){
-	    send_data_DD[0] = 1;
-	    HAL_Delay(500);
-	    send_data_DD[1] = 1;
-	    sri_data_s[3] = 1;
-	    sirei_s = 1;
+	else if(can_data_r.rx_stdid == 0x320){
+      a = can_data_r.rx_data[0];
 	}
-	else{
-		send_data_DD[0] = 0;
-		send_data_DD[1] = 0;
+	else if(can_data_r.rx_stdid == 0x114){
+	  b = can_data_r.rx_data[0];
 	}
 }
 
-void koon_kaisyu(void){
-	if(sirei_r == 3){
-    double mkhyo = 250;
-    kyori = 80*mtr_koon_d/360;
-    while(limit_data[0] == 1){
-    	mtr.write(30);
+void main_interrupt(void) {
+    double wheel_disp[4];  // 各ホイールの移動距離
+    double delta_deg[4];   // エンコーダの変化量
+
+    // **エンコーダの値を取得**
+    for (int i = 0; i < 4; ++i) {
+        encoder[i].interrupt(&e_data[i]);
     }
-    HAL_Delay(500);
-    send_data_DD[3] = 1;
-    HAL_Delay(500);
-    send_data_DD[4] = 1;
-    HAL_Delay(1000);
-    while(kyori == 250){
-        out = pid_mtr_koon.control(mkhyo,kyori,1);
-        mtr.write(out);
-    }
-    sirei_s = 3;
-	}
-}
 
-void bool_kaisyu(void){
-    mtr_rps_on[3] = 30;
-}
-void bool_hasya(void){
-	mtr_rps_on[1] = 30;
-	mtr_rps_on[2] = 30;
-	mtr_rps_on[3] = 5;
+    // **初回のみエンコーダの初期値を記録**
+    if (!init_done) {
+        for (int i = 0; i < 4; ++i) {
+            init_deg[i] = e_data[i].deg;
+        }
+        init_done = true;
+    }
+
+    // **エンコーダの変化量を取得 (絶対値)**
+    for (int i = 0; i < 4; ++i) {
+        delta_deg[i] = e_data[i].deg - init_deg[i];  // 角度の変化量
+        wheel_disp[i] = (tyok * M_PI * delta_deg[i]) / 360.0;  // 角度 → mm
+    }
+
+    // **ホイールのインデックス**
+    double F = wheel_disp[0];  // 前ホイール
+    double R = wheel_disp[1];  // 右ホイール
+    double B = wheel_disp[2];  // 後ホイール
+    double L = wheel_disp[3];  // 左ホイール
+
+    // **ロボットの回転角 (theta) の計算**
+    double delta_theta = ((R + L) - (F + B)) / (4.0 * k_han) * (180.0 / M_PI);
+    theta += delta_theta;
+
+    // **角度を -180° 〜 180° に制限**
+    while (theta > 180) theta -= 360;
+    while (theta < -180) theta += 360;
+
+    // **並進速度の計算（ホイールの移動距離を考慮）**
+    double vx = (F - B) / 2.0;  // 前後方向
+    double vy = (R - L) / 2.0;  // 左右方向
+
+    // **角度を考慮した座標更新**
+    double rad_theta = theta * M_PI / 180.0;  // 度数法 → ラジアン変換
+    x += vx * cos(rad_theta) - vy * sin(rad_theta);
+    y += vx * sin(rad_theta) + vy * cos(rad_theta);
+
+    // **送信データの更新**
+    send_data_enc[0] = static_cast<int16_t>(x);
+    send_data_enc[1] = static_cast<int16_t>(y);
+    send_data_enc[2] = static_cast<int16_t>(theta);
 }
 
 int main(void)
 {
-    sken_system.init();
-    sken_module_init();
-    sken_system.init();
-    serial.init(A9,A10,SERIAL1,9600);
-    sken_system.startCanCommunicate(B13,B12,CAN_2);
-    encoder[0].init(A0,A1,TIMER2);
-    encoder[1].init(B3,A5,TIMER3);
-    encoder[2].init(B6,B7,TIMER4);
-    encoder[3].init(C6,C7,TIMER5);
-    mtr.init(Apin,B8,TIMER1,CH1);
-    mtr.init(Bpin,B9,TIMER1,CH1);
-    SW.init(C13,INPUT_PULLUP);
-    pid_control.setGain(1,0.1,0.01);
-    pid_mtr_koon.setGain(1,0.1,0.01);
-    pid_mtr_bool.setGain(1,0.1,0.01);
-    sken_system.addTimerInterruptFunc(0,1);
-    sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
-	while(1){
-		sri_data_r[4] = serial.read(1000);
-		for(int c=0;c>3;c++){
-		asi_rps[c] = sri_data_r[c];
-		}
-		sirei_r = sri_data_r[3];
-		sri_data_s[3] = sirei_s;
-		serial.write(sri_data_s,4);
-        sken_module_receive();
-        sken_system.canTransmit(CAN_2,0x300,mtr_rps_on,8,1);
-        sken_system.canTransmit(CAN_2,0x114,asi_rps_off,8,1);
-
+	sken_system.init();
+	sken_system.startCanCommunicate(B13,B12,CAN_2);//CAN開始
+	encoder[0].init(A0, A1, TIMER5);
+	encoder[1].init(B3, A5, TIMER2); //invert
+    encoder[2].init(B6, B7, TIMER4);
+	encoder[3].init(C6, C7, TIMER8);
+	limit[0].init(B15, INPUT_PULLUP);
+	limit[1].init(B14, INPUT_PULLUP);
+	limit[2].init(A11, INPUT_PULLUP);
+	limit[3].init(A8, INPUT_PULLUP);
+	limit[4].init(A7, INPUT_PULLUP);
+	limit[5].init(A6, INPUT_PULLUP);
+	limit[6].init(B9, INPUT_PULLUP);
+	limit[7].init(B8, INPUT_PULLUP);
+	sken_system.addTimerInterruptFunc(can,1,10);
+	sken_system.addTimerInterruptFunc(main_interrupt,2,1);
+	while (1) {
+		sken_system.canTransmit(CAN_2,0x360,send_data_enc,8,1);
+		sken_system.canTransmit(CAN_2,0x250,send_data_limit,8,1);
 	}
 }
+
