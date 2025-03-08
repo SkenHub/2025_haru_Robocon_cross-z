@@ -52,8 +52,8 @@ void main_interrupt(void) {
     B = wheel_disp[2];
     L = wheel_disp[3];
 
-    delta_theta = (((R - oR) + (L - oL)) - ((F - oF) + (B - oB))) / (4.0 * k_han);
-    theta += delta_theta;
+    delta_theta = (((R - wheel_disp[1]) + (L - wheel_disp[3])) - ((F - wheel_disp[0]) + (B - wheel_disp[2]))) / (4.0 * k_han);
+    theta = delta_theta; // +=ではなく、初期状態からの変位で計算
     vx = (F - oF - (B - oB)) / 2.0;
     vy = (R - oR - (L - oL)) / 2.0;
     oF = F;
