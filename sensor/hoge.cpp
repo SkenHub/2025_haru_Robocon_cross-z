@@ -7,6 +7,8 @@ Encoder encoder[4];
 Encoder_data e_data[4];
 Gpio limit[8];
 
+double dis;
+
 double tyok = 59.64;    // ホイール直径
 double k_han = 143.165; // マシン半径
 
@@ -52,8 +54,9 @@ void main_interrupt(void) {
     B = wheel_disp[2];
     L = wheel_disp[3];
 
-    delta_theta = (((R - wheel_disp[1]) + (L - wheel_disp[3])) - ((F - wheel_disp[0]) + (B - wheel_disp[2]))) / (4.0 * k_han);
-    theta = delta_theta; // +=ではなく、初期状態からの変位で計算
+    //delta_theta = (((0 - wheel_disp[1]) + (0 - wheel_disp[3])) - ((0 - wheel_disp[0]) + (0 - wheel_disp[2]))) / (4.0 * k_han);
+    dis = (wheel_disp[1]-wheel_disp[3] )/2;
+    theta = (dis/2*M_PI*k_han)*360;//delta_theta;
     vx = (F - oF - (B - oB)) / 2.0;
     vy = (R - oR - (L - oL)) / 2.0;
     oF = F;
@@ -68,10 +71,10 @@ void main_interrupt(void) {
     x += vx * cos(rad_theta) - vy * sin(rad_theta);
     y += vx * sin(rad_theta) + vy * cos(rad_theta);
 
-    send_data_enc[0] = (x >> 8) & 0xFF;
+    /*send_data_enc[0] = (x >> 8) & 0xFF;
     send_data_enc[1] = x & 0xFF;
     send_data_enc[2] = (y >> 8) & 0xFF;
-    send_data_enc[3] = y & 0xFF;
+    send_data_enc[3] = y & 0xFF;*/
     int16_t theta_int = static_cast<int16_t>(theta);
     send_data_enc[4] = (theta_int >> 8) & 0xFF;
     send_data_enc[5] = theta_int & 0xFF;
@@ -96,7 +99,7 @@ int main(void) {
     limit[5].init(A6, INPUT_PULLUP);
     limit[6].init(B9, INPUT_PULLUP);
     limit[7].init(B8, INPUT_PULLUP);
-    sken_system.addTimerInterruptFunc(can, 1, 10);
+    //sken_system.addTimerInterruptFunc(can, 1, 10);
     sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
     while (1) {
         sken_system.canTransmit(CAN_2, 0x360, send_data_enc, 8, 1);
