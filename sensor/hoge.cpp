@@ -44,7 +44,7 @@ void main_interrupt(void) {
 
     for (int i = 0; i < 4; ++i) {
         delta_deg[i] = e_data[i].deg - init_deg[i];
-        wheel_disp[i] = (tyok * M_PI * delta_deg[i]) / 360.0;
+        wheel_disp[i] = e_data[i].distance; // distance を使用
     }
 
     F = wheel_disp[0];
