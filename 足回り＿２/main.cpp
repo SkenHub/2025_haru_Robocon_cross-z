@@ -28,7 +28,6 @@ double now[4];
 double out[4];
 uint8_t a,b,c,d,e,f;
 
-uint8_t candata_s[8] = {0,0,0,0,0,0,0,0};
 uint8_t candata_r[8];
 
 double asi_rps_on[8] = {out[0],out[1],out[2],out[3]};
@@ -43,19 +42,6 @@ void func(void)
 	for(int n=0;n<4;n++){
 		now[n] = e_data[n].rps;
 	}
-	/*if(candata_r[2] == 0){
-		target[0] = candata_r[0];
-		target[2] = candata_r[0];
-	    target[1] = candata_r[1];
-		target[3] = candata_r[1];
-	}
-	else{
-		float senk;
-		senk = (2*3.141529*candata_r[3])/360;
-		for(int w=0;w<4;w++){
-			target[w] = senk;
-		}
-	}*/
 	target[0] = (-candata_r[0] + syarin_e * candata_r[2]) / (2 * pai * syatai_hk);
 	target[1] = (-candata_r[1] + syarin_e * candata_r[2]) / (2 * pai * syatai_hk);
 	target[2] = (candata_r[0] + syarin_e * candata_r[2]) / (2 * pai * syatai_hk);
@@ -69,17 +55,6 @@ void func(void)
 	mtr[3].write(out[3]);
 }
 
-void can_send(void){
-	/*x_count = (enc_data_r[0]+enc_data_r[2])/2/1000*syarin_e;
-	y_count = (enc_data_r[1]+enc_data_r[3])/2/1000*syarin_e;
-	if((enc_data_r[0]<0 && enc_data_r[2]>0)||(enc_data_r[0]>0 && enc_data_r[2]<0)){
-	k_count = (enc_data_r[0]+enc_data_r[1]+enc_data_r[2]+enc_data_r[3])/4/1000*syarin_e/144.67;
-	}
-	x += x_count;
-	y += y_count;
-	k += k_count;*/
-	//sken_system.canTransmit(CAN_2,0x400,candata_s,8,1);//CAN送信
-}
 void can_rceive(void){
 	if(can_data_r.rx_stdid == 0x114){
 	    candata_r[0] = can_data_r.rx_data[0];
@@ -121,9 +96,8 @@ int main(void)
 	pid_control[3].setGain(30,0,0.01);
 	sken_system.startCanCommunicate(B13,B12,CAN_2);//CAN開始
 	sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_r);//CAN受信
-	sken_system.addTimerInterruptFunc(can_rceive,3,1);
+	sken_system.addTimerInterruptFunc(can_rceive,3,10);
 	sken_system.addTimerInterruptFunc(func,1,1);
-	//sken_system.addTimerInterruptFunc(can_send,2,1);
 	while (1) {
 		}
 }
