@@ -1,134 +1,207 @@
+/**
+  ******************************************************************************
+  * @file    main.c
+  * @author  Ac6
+  * @version V1.0
+  * @date    01-December-2013
+  * @brief   Default main function.
+  ******************************************************************************
+*/
+
 #include "stm32f4xx.h"
 #include "stm32f4xx_nucleo.h"
 #include "sken_library/include.h"
-#include "math.h"
+#include "sken_module.hpp"
 
+Uart pc_serial;
+uint8_t sri_data_r[6];
+//uint8_t sri_data_s[6] = {0xA5,0xA5,0,1,2,3};
+uint8_t sri_data_s[6] = {0,0,0,0,0,0};
+int sirei_r = 3;
+int sirei_s = 0;
+
+//uint8_t send_data_DD[8] = {1,1,1,1,1,1,1,1};
+uint8_t send_data_DD[8] = {0,0,0,0,0,0,0,0};
+int limit_data[7];
+Gpio SW;
 Encoder encoder[4];
 Encoder_data e_data[4];
-Gpio limit[8];
+CanData can_data_enc;
+uint8_t candata_enc;
+int16_t x,y,theta;
 
-double tyok = 60.0;    // ホイール直径
-double k_han = 143.165; // マシン半径
+Pid pid_control;
+Pid pid_mtr_koon;
+Pid pid_mtr_bool;
+double target = 30.0;
+double now[4];
+uint8_t out_bool[8];
 
-double init_deg[4] = {0, 0, 0, 0}; // エンコーダの初期角度取得用
-bool init_done = false;            // 初期値取得済みフラグ
+const uint8_t mtr_org[8] = {0,0,0,0,0,0,0,0};
+uint8_t mtr_rps_on[8] = {30/*out_bool[0]*/,30/*out_bool[1]*/,5,0,0,0,0,0};
+uint8_t mtr_rps_off[8] = {0,0,0,0,0,0,0,0};
+uint8_t asi_rps[8] = {sri_data_r[0],sri_data_r[1],sri_data_r[2],0,0,0,0,0};
+uint8_t asi_rps_off[8] = {1,1,1,1,1,1,1,1};
 
-// グローバルな自己位置推定変数
-double x = 0.0, y = 0.0;      // ワールド座標での位置
-double theta = 0.0;           // ロボットの向き（度）
-double rad_theta = 0.0;       // ロボットの向き（ラジアン）
+double mtr_koon_d;
+double mtr_bool_h;
+double mtr_bool_l;
+double kyori;
+double mkhyo = 0;
+Motor mtr;
+double out;
 
-// エンコーダからの累積距離（各ホイール）
-double F, R, B, L;           // Front, Right, Back, Left の各ホイール
-// 前回の値（差分計算用）
-double oF = 0.0, oR = 0.0, oB = 0.0, oL = 0.0;
+CanData can_data_r;
+//uint8_t candata_enc[8];
+uint8_t a,b,c,d,e,f;
 
-// ロボットの局所座標系での移動量
-double vx, vy;
-// 角度変化量
-double delta_theta;         // 単位: 度
-
-uint8_t send_data_enc[8];   // エンコーダ関連CAN送信データ
-uint8_t send_data_limit[8]; // リミットスイッチのCAN送信データ
-
-// タイマー割り込み関数（オドメトリ更新）
-void main_interrupt(void) {
-    // 各エンコーダの割り込み処理
-    for (int i = 0; i < 4; ++i) {
-        encoder[i].interrupt(&e_data[i]);
-    }
-
-    // 初回実行時はエンコーダの初期値を保存
-    if (!init_done) {
-        for (int i = 0; i < 4; ++i) {
-            init_deg[i] = e_data[i].deg;
-        }
-        oF = e_data[0].distance;
-        oR = e_data[1].distance;
-        oB = e_data[2].distance;
-        oL = e_data[3].distance;
-        init_done = true;
-        return; // 初回は位置更新を行わずに終了
-    }
-
-    // 現在の各ホイールの累積距離を取得
-    F = e_data[0].distance;
-    R = e_data[1].distance;
-    B = e_data[2].distance;
-    L = e_data[3].distance;
-
-    // 各ホイールの今回の増分を計算
-    double delta_F = F - oF;
-    double delta_R = R - oR;
-    double delta_B = B - oB;
-    double delta_L = L - oL;
-
-    // 角度変化量(delta_theta)の計算
-    // 右側（R, L）の合計と前面・背面（F, B）の合計の差分から角度変化を求める
-    // ※結果はラジアン単位なので、度に変換
-    double delta_theta_rad = ((delta_R + delta_L) - (delta_F + delta_B)) / (4.0 * k_han);
-    delta_theta = delta_theta_rad * (180.0 / M_PI);
-    theta += delta_theta;  // 角度変化を累積
-
-    // thetaを[-180, 180]の範囲に正規化
-    while (theta > 180.0) theta -= 360.0;
-    while (theta < -180.0) theta += 360.0;
-
-    // ロボット座標系での移動量の計算
-    // ここでは、FとBの差がX軸、RとLの差がY軸の移動に相当すると仮定
-    vx = (delta_F - delta_B) / 2.0;
-    vy = (delta_R - delta_L) / 2.0;
-
-    // ワールド座標への変換：現在の向き(theta)を利用
-    rad_theta = theta * M_PI / 180.0;
-    x += vx * cos(rad_theta) - vy * sin(rad_theta);
-    y += vx * sin(rad_theta) + vy * cos(rad_theta);
-
-    // 次回計算用に現在値を保存
-    oF = F;
-    oR = R;
-    oB = B;
-    oL = L;
-
-    // CAN送信用データ例：ここでは角度(theta)を送信（16ビット整数に変換）
-    int16_t theta_int = static_cast<int16_t>(theta);
-    send_data_enc[4] = (theta_int >> 8) & 0xFF;
-    send_data_enc[5] = theta_int & 0xFF;
-
-    // 各リミットスイッチの状態を読み取り
-    for (int i = 0; i < 8; i++) {
-        send_data_limit[i] = limit[i].read();
-    }
+void can_rceive(void){
+	if(can_data_r.rx_stdid == 0x360){
+		sri_data_s[0] = can_data_r.rx_data[0];
+		sri_data_s[1] = can_data_r.rx_data[1];
+		sri_data_s[2] = can_data_r.rx_data[2];
+		sri_data_s[3] = can_data_r.rx_data[3];
+		sri_data_s[4] = can_data_r.rx_data[4];
+		sri_data_s[5] = can_data_r.rx_data[5];
+	}
+    if(can_data_r.rx_stdid == 0x250){
+	  for(int d=0;d<7;d++){
+	  limit_data[d] = can_data_r.rx_data[d];
+	  }
+	}
+    if(can_data_r.rx_stdid == 0x320){
+      a = can_data_r.rx_data[0];
+	}
+    if(can_data_r.rx_stdid == 0x114){
+	  b = can_data_r.rx_data[0];
+	}
+	if(can_data_r.rx_stdid == 0x300){
+	  c = can_data_r.rx_data[0];
+	}
 }
 
-int main(void) {
-    // システム初期化
-    sken_system.init();
-    sken_system.startCanCommunicate(B13, B12, CAN_2); // CAN通信開始
 
-    // エンコーダの初期化（各ピンとタイマーを指定）
-    encoder[0].init(A0, A1, TIMER5,60.0);
-    encoder[1].init(B3, A5, TIMER2,60.0);
-    encoder[2].init(B6, B7, TIMER4,60.0);
-    encoder[3].init(C6, C7, TIMER8,60.0);
+void main_interrupt(void){
+	/*for (int i = 0; i < 4; ++i) {
+		 encoder[i].interrupt(&e_data[i]);
+	}*/
+	module_transmitter[SOLENOID_0].transmit(send_data_DD);
+	mtr_koon_d = e_data[0].deg;
+	mtr_bool_h = e_data[1].rps;
+	mtr_bool_l = e_data[2].rps;
+	out_bool[0] = pid_control.control(target,mtr_bool_h,1);
+	out_bool[1] = pid_control.control(target,mtr_bool_l,1);
+}
 
-    // リミットスイッチの初期化（各ピン、プルアップ設定）
-    limit[0].init(B15, INPUT_PULLUP);
-    limit[1].init(B14, INPUT_PULLUP);
-    limit[2].init(A11, INPUT_PULLUP);
-    limit[3].init(A8, INPUT_PULLUP);
-    limit[4].init(A7, INPUT_PULLUP);
-    limit[5].init(A6, INPUT_PULLUP);
-    limit[6].init(B9, INPUT_PULLUP);
-    limit[7].init(B8, INPUT_PULLUP);
-
-    // タイマー割り込みに自己位置更新関数を登録
-    // 例：タイマー2、1ms間隔でmain_interrupt()を実行
-    sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
-
-    // メインループ：CAN通信でエンコーダ・リミットスイッチのデータを送信
-    while (1) {
-        sken_system.canTransmit(CAN_2, 0x360, send_data_enc, 8, 1);
-        sken_system.canTransmit(CAN_2, 0x250, send_data_limit, 8, 1);
+void hako_kaisyu(void){
+	if(sirei_r == 1){
+	    send_data_DD[0] = 1;
+	    send_data_DD[1] = 1;
+	    sri_data_s[3] = 1;
+	    sirei_s = 1;
     }
+	else if(sirei_r == 2){
+	    send_data_DD[0] = 0;
+	    send_data_DD[1] = 0;
+	    sirei_s = 2;
+	}
+}
+void koon_kaisyu(void){
+	if(sirei_r == 3){
+	    mkhyo = 250;
+		kyori = 80*mtr_koon_d/360;
+		while(kyori == 250){
+		    out = pid_mtr_koon.control(mkhyo,kyori,1);
+		    mtr.write(out);
+		}
+		send_data_DD[5] = 0;
+		while(limit_data[7] == 1){
+		    mtr.write(-30);
+		}
+		send_data_DD[3] = 1;
+	 }
+	 if(sirei_r == 4){
+		 mkhyo = 250;
+		 send_data_DD[3] = 0;
+	     send_data_DD[4] = 1;
+	     while(kyori == 250){
+	         out = pid_mtr_koon.control(mkhyo,kyori,1);
+	         mtr.write(out);
+	     }
+	     send_data_DD[5] = 1;
+	     send_data_DD[3] = 1;
+	     while(limit_data[0] == 1){
+	         mtr.write(-30);
+	     }
+	     send_data_DD[4] = 0;
+	     sirei_s = 3;
+	  }
+}
+
+int main(void)
+{
+    sken_system.init();
+    sken_module_init();
+    pc_serial.init(C10,A11,SERIAL4,9600);
+    pc_serial.startDmaRead(sri_data_r,6);
+    sken_system.startCanCommunicate(B13,B12,CAN_2);//CAN開始
+    sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_r);//CAN受信
+    encoder[0].init(A0, A1, TIMER5);
+    encoder[1].init(B3, A5, TIMER2);
+    encoder[2].init(B6, B7, TIMER4);
+    encoder[3].init(C6, C7, TIMER8);
+    mtr.init(Apin,B8,TIMER10,CH1);
+    mtr.init(Bpin,B9,TIMER11,CH1);
+    SW.init(C13,INPUT_PULLUP);
+    pid_control.setGain(1,0.1,0.01);
+    pid_mtr_koon.setGain(1,0.1,0.01);
+    pid_mtr_bool.setGain(1,0.1,0.01);
+    sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
+    sken_system.addTimerInterruptFunc(can_rceive,3,1);
+    sken_system.addTimerInterruptFunc(koon_kaisyu,4,700);
+    sken_system.addTimerInterruptFunc(hako_kaisyu,5,500);
+	while(1){
+		for (int i = 0; i < 4; ++i) {
+		    encoder[i].interrupt(&e_data[i]);
+		}
+		sri_data_r[4] = pc_serial.read(1000);
+		for(int c=0;c>3;c++){
+		asi_rps[c] = sri_data_r[c];
+		}
+		//sirei_r = sri_data_r[3];
+		sri_data_s[6] = sirei_s;
+		pc_serial.write(sri_data_s,6);
+        sken_module_receive();
+        sken_system.canTransmit(CAN_2,0x300,mtr_rps_on,8,1);
+        sken_system.canTransmit(CAN_2,0x114,asi_rps_off,8,1);
+
+     //ボール回収
+       if(sirei_r == 5){
+           mtr_rps_on[3] = 30;
+           sirei_s = 4;
+        }
+     //ボール発射
+       if(sirei_r == 6){
+    	   send_data_DD[2] = 0;
+       }
+       else{
+    	   send_data_DD[2] = 1;
+       }
+       if(sirei_r == 6){
+           mtr_rps_on[1] = 30;
+       	   mtr_rps_on[2] = 30;
+       	   mtr_rps_on[3] = 5;
+       	   sirei_s = 5;
+       }
+       else if(sirei_r == 7){
+    	   mtr_rps_on[1] = 20;
+    	   mtr_rps_on[2] = 20;
+    	   mtr_rps_on[3] = 5;
+    	   sirei_s = 6;
+       }
+       else if(sirei_r == 8){
+    	   mtr_rps_on[3] = -5;
+    	   sirei_s = 7;
+       }
+	}
 }
