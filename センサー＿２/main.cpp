@@ -109,7 +109,7 @@ void main_interrupt(void) {
     }
 }
 
-void can_rceive(void){
+void can(void){
 	if(can_data_r.rx_stdid == 0x360){
 	  a = can_data_r.rx_data[0];
 	}
@@ -125,13 +125,15 @@ void can_rceive(void){
 	if(can_data_r.rx_stdid == 0x300){
 	  e = can_data_r.rx_data[0];
 	}
+	sken_system.canTransmit(CAN_2, 0x360, send_data_enc, 8, 1);
+	sken_system.canTransmit(CAN_2, 0x250, send_data_limit, 8, 1);
 }
 
 int main(void) {
     // システム初期化
     sken_system.init();
     sken_system.startCanCommunicate(B13, B12, CAN_2); // CAN通信開始
-    sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_r);
+    sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_r);//CAN通信
     // エンコーダの初期化（各ピンとタイマーを指定）
     encoder[0].init(A0, A1, TIMER5,60.0);
     encoder[1].init(B3, A5, TIMER2,60.0);
@@ -151,11 +153,9 @@ int main(void) {
     // タイマー割り込みに自己位置更新関数を登録
     // 例：タイマー2、1ms間隔でmain_interrupt()を実行
     sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
-    sken_system.addTimerInterruptFunc(can_rceive, 3, 1);
+    sken_system.addTimerInterruptFunc(can, 3, 10);
 
     // メインループ：CAN通信でエンコーダ・リミットスイッチのデータを送信
     while (1) {
-        sken_system.canTransmit(CAN_2, 0x360, send_data_enc, 8, 1);
-        sken_system.canTransmit(CAN_2, 0x250, send_data_limit, 8, 1);
     }
 }
