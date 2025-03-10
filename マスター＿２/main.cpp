@@ -17,7 +17,7 @@ Uart pc_serial;
 uint8_t sri_data_r[6];
 //uint8_t sri_data_s[6] = {0xA5,0xA5,0,1,2,3};
 uint8_t sri_data_s[6] = {0,0,0,0,0,0};
-int sirei_r = 0;
+int sirei_r = 3;
 int sirei_s = 0;
 
 //uint8_t send_data_DD[8] = {1,1,1,1,1,1,1,1};
@@ -47,6 +47,7 @@ double mtr_koon_d;
 double mtr_bool_h;
 double mtr_bool_l;
 double kyori;
+double mkhyo = 0;
 Motor mtr;
 double out;
 
@@ -81,12 +82,10 @@ void can_rceive(void){
 
 
 void main_interrupt(void){
+	/*for (int i = 0; i < 4; ++i) {
+		 encoder[i].interrupt(&e_data[i]);
+	}*/
 	module_transmitter[SOLENOID_0].transmit(send_data_DD);
-	//sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_enc);
-	encoder[0].interrupt(&e_data[0]);
-	encoder[1].interrupt(&e_data[1]);
-	encoder[2].interrupt(&e_data[2]);
-	encoder[3].interrupt(&e_data[3]);
 	mtr_koon_d = e_data[0].deg;
 	mtr_bool_h = e_data[1].rps;
 	mtr_bool_l = e_data[2].rps;
@@ -94,21 +93,48 @@ void main_interrupt(void){
 	out_bool[1] = pid_control.control(target,mtr_bool_l,1);
 }
 
+void hako_kaisyu(void){
+	if(sirei_r == 1){
+	    send_data_DD[0] = 1;
+	    send_data_DD[1] = 1;
+	    sri_data_s[3] = 1;
+	    sirei_s = 1;
+    }
+	else if(sirei_r == 2){
+	    send_data_DD[0] = 0;
+	    send_data_DD[1] = 0;
+	    sirei_s = 2;
+	}
+}
 void koon_kaisyu(void){
-	 if(sirei_r == 3){
-	     double mkhyo = 250;
-	     kyori = 80*mtr_koon_d/360;
-	     while(limit_data[0] == 1){
-	         mtr.write(30);
-	     }
-	     send_data_DD[3] = 1;
-	     HAL_Delay(500);
+	if(sirei_r == 3){
+	    mkhyo = 250;
+		kyori = 80*mtr_koon_d/360;
+		while(kyori == 250){
+		    out = pid_mtr_koon.control(mkhyo,kyori,1);
+		    mtr.write(out);
+		}
+		send_data_DD[5] = 0;
+		while(limit_data[7] == 1){
+		    mtr.write(-30);
+		}
+		send_data_DD[3] = 1;
+	 }
+	 if(sirei_r == 4){
+		 mkhyo = 250;
+		 send_data_DD[3] = 0;
 	     send_data_DD[4] = 1;
 	     while(kyori == 250){
 	         out = pid_mtr_koon.control(mkhyo,kyori,1);
 	         mtr.write(out);
 	     }
-	  sirei_s = 3;
+	     send_data_DD[5] = 1;
+	     send_data_DD[3] = 1;
+	     while(limit_data[0] == 1){
+	         mtr.write(-30);
+	     }
+	     send_data_DD[4] = 0;
+	     sirei_s = 3;
 	  }
 }
 
@@ -121,50 +147,61 @@ int main(void)
     sken_system.startCanCommunicate(B13,B12,CAN_2);//CAN開始
     sken_system.addCanRceiveInterruptFunc(CAN_2,&can_data_r);//CAN受信
     encoder[0].init(A0, A1, TIMER5);
-    encoder[1].init(B3, A5, TIMER2); //invert
+    encoder[1].init(B3, A5, TIMER2);
     encoder[2].init(B6, B7, TIMER4);
     encoder[3].init(C6, C7, TIMER8);
-    mtr.init(Apin,B8,TIMER1,CH1);
-    mtr.init(Bpin,B9,TIMER1,CH1);
+    mtr.init(Apin,B8,TIMER10,CH1);
+    mtr.init(Bpin,B9,TIMER11,CH1);
     SW.init(C13,INPUT_PULLUP);
     pid_control.setGain(1,0.1,0.01);
     pid_mtr_koon.setGain(1,0.1,0.01);
     pid_mtr_bool.setGain(1,0.1,0.01);
     sken_system.addTimerInterruptFunc(main_interrupt, 2, 1);
     sken_system.addTimerInterruptFunc(can_rceive,3,1);
-    sken_system.addTimerInterruptFunc(koon_kaisyu,4,1000);
+    sken_system.addTimerInterruptFunc(koon_kaisyu,4,700);
+    sken_system.addTimerInterruptFunc(hako_kaisyu,5,500);
 	while(1){
+		for (int i = 0; i < 4; ++i) {
+		    encoder[i].interrupt(&e_data[i]);
+		}
 		sri_data_r[4] = pc_serial.read(1000);
 		for(int c=0;c>3;c++){
 		asi_rps[c] = sri_data_r[c];
 		}
-		sirei_r = sri_data_r[3];
+		//sirei_r = sri_data_r[3];
 		sri_data_s[6] = sirei_s;
 		pc_serial.write(sri_data_s,6);
         sken_module_receive();
         sken_system.canTransmit(CAN_2,0x300,mtr_rps_on,8,1);
         sken_system.canTransmit(CAN_2,0x114,asi_rps_off,8,1);
-        //箱回収
-        if(sirei_r == 1){
-            send_data_DD[0] = 1;
-            HAL_Delay(500);
-            send_data_DD[1] = 1;
-            sri_data_s[3] = 1;
-            sirei_s = 1;
-        }
-        else{
-        	send_data_DD[0] = 0;
-        	send_data_DD[1] = 0;
-        }
+
      //ボール回収
-       if(sirei_r == 4){
+       if(sirei_r == 5){
            mtr_rps_on[3] = 30;
+           sirei_s = 4;
         }
      //ボール発射
-       if(sirei_r == 5){
+       if(sirei_r == 6){
+    	   send_data_DD[2] = 0;
+       }
+       else{
+    	   send_data_DD[2] = 1;
+       }
+       if(sirei_r == 6){
            mtr_rps_on[1] = 30;
        	   mtr_rps_on[2] = 30;
        	   mtr_rps_on[3] = 5;
+       	   sirei_s = 5;
+       }
+       else if(sirei_r == 7){
+    	   mtr_rps_on[1] = 20;
+    	   mtr_rps_on[2] = 20;
+    	   mtr_rps_on[3] = 5;
+    	   sirei_s = 6;
+       }
+       else if(sirei_r == 8){
+    	   mtr_rps_on[3] = -5;
+    	   sirei_s = 7;
        }
 	}
 }
