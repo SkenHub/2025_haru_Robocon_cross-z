@@ -187,10 +187,11 @@ int main(void)
     pid_mtr_koon.setGain(1,0.1,0.01);
     pid_mtr_bool.setGain(1,0.1,0.01);
     sken_system.addTimerInterruptFunc(main_interrupt, 1, 1);
-    sken_system.addTimerInterruptFunc(can,3,10);
+    sken_system.addTimerInterruptFunc(can,3,1);
     sken_system.addTimerInterruptFunc(koon_kaisyu,6,700);
-    sken_system.addTimerInterruptFunc(hako_kaisyu,7,500);
+    sken_system.addTimerInterruptFunc(hako_kaisyu,7,700);
 	while(1){
+		limit_data[0] = can_data_r.rx_data[0];
 		for(int c=0;c>6;c++){
 		asi_rps[c] = sri_data_r[c];
 		}
@@ -199,9 +200,9 @@ int main(void)
 	 //初期展開
 		mtr_koon_d = e_data[0].deg;
 		kyori = 80*mtr_koon_d/360;
-		sirei_r = 1;
+		sirei_r = 6;
 		if(sirei_r == 1 && aizu[0] != 3){
-			if(kyori < -75){
+			if(kyori < -80){
 				aizu[0] = 1;
 			}
 		    if(aizu[0] == 1){
@@ -230,35 +231,32 @@ int main(void)
        //ボール回収
        if(sirei_r == 3){
     	   mtr[1].write(30);
-           sirei_s = 7;
+           sirei_s = 3;
         }
        //ボール発射
        if(sirei_r == 4){
     	   send_data_DD[2] = 1;
     	   mtr[2].write(50);
     	   mtr[3].write(30);
-       	   sirei_s = 5;
+       	   sirei_s = 4;
        }
        else if(sirei_r == 5){
     	   send_data_DD[2] = 0;
     	   mtr[2].write(25);
     	   mtr[3].write(30);
-    	   sirei_s = 6;
-       }
-       else if(sirei_r == 11){
-    	   mtr_rps_on[3] = -5;
-    	   sirei_s = 7;
+    	   sirei_s = 5;
        }
        //コーン回収
        	if(sirei_r == 6){
        		if(sirei_r == 6 && aizu[5] == 0){
        			denzi_k[0] = 1;//電磁弁３，４をOFFにする
-       			if(kyori > -35 && aizu[9] == 0){
+       			if(kyori < -35 && aizu[14] == 0){
        			    send_data_DD[5] = 0;//距離がー３５以下かつ一回目なら電磁弁５をOFF
-       			    aizu[9] = 1;
+       			    aizu[14] = 1;
        			}
-       			if(kyori > -75){
+       			if(kyori < -80 && aizu[13] == 0){
        			    aizu[6] = 1;
+       			    aizu[13] = 1;
        		    }
        			if(aizu[6] == 1){//距離がー７５以下になったら、モーター停止後電磁弁５，３をON
        			    mtr[0].write(0);
@@ -270,7 +268,7 @@ int main(void)
        			if(aizu[6] == 0 && denzi_k[2] == 1){
        			    mtr[0].write(20);//今回の動作が一回目かつ電磁弁３，４がOFFになったならモーターを正回転
                 }
-       			if(limit_data[6] == 0 && aizu[6] == 2){//リミットがONかつ電磁弁５，３がONになったら、モーター停止＆電磁弁４をＯＮ
+       			if(limit_data[0] == 0 && aizu[6] == 2){//リミットがONかつ電磁弁５，３がONになったら、モーター停止＆電磁弁４をＯＮ
        			    mtr[0].write(0);
        			    send_data_DD[4] = 1;
        			    aizu[6] = 3;
@@ -288,7 +286,7 @@ int main(void)
        	}
         //コーンリリース
         if(sirei_r == 8 && aizu[16] == 0){
-        	send_data_DD[6] = 1;
+        	send_data_DD[5] = 1;
         	aizu[16] = 1;
         }
 	}
